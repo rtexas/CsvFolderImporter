@@ -1,0 +1,47 @@
+# .NET build output
+bin/
+obj/
+
+# Publish output
+publish/
+
+# User-specific files
+*.user
+*.suo
+.vs/
+
+# NuGet
+*.nupkg
+packages/
+.nuget/
+
+# WiX installer build output
+Installer/bin/
+Installer/obj/
+Installer/DefaultValues.wxi
+Installer/bin/
+
+# Node / npm (Docs scripts)
+Docs/node_modules/
+Docs/package-lock.json
+
+# Generated WiX harvest file (rebuilt each time)
+AppFiles.wxs
+
+# Log files written at runtime
+Log_*.txt
+
+# setup_config.ini (written by installer at runtime)
+setup_config.ini
+
+# Installer run logs and Visual Studio upgrade artifacts
+installeroutput.txt
+UpgradeLog.htm
+*.htm
+
+# Claude session files
+CSVImporterClaudeText.txt
+
+# OS
+.DS_Store
+Thumbs.db

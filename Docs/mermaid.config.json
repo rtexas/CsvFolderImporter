@@ -1,0 +1,38 @@
+{
+  "theme": "base",
+
+  "themeVariables": {
+    "background":            "#F8FAFC",
+    "primaryColor":          "#1F4E79",
+    "primaryTextColor":      "#FFFFFF",
+    "primaryBorderColor":    "#FFFFFF",
+    "secondaryColor":        "#2E7D32",
+    "secondaryTextColor":    "#FFFFFF",
+    "secondaryBorderColor":  "#FFFFFF",
+    "tertiaryColor":         "#4A235A",
+    "tertiaryTextColor":     "#FFFFFF",
+    "tertiaryBorderColor":   "#FFFFFF",
+    "lineColor":             "#37474F",
+    "edgeLabelBackground":   "#FFFFFF",
+    "clusterBkg":            "#F2F2F2",
+    "clusterBorder":         "#CCCCCC",
+    "titleColor":            "#1F4E79",
+    "fontFamily":            "Arial, Helvetica, sans-serif",
+    "fontSize":              "14px",
+    "nodeBorder":            "#FFFFFF"
+  },
+
+  "flowchart": {
+    "htmlLabels":      true,
+    "curve":           "basis",
+    "diagramPadding":  24,
+    "nodeSpacing":     50,
+    "rankSpacing":     60,
+    "useMaxWidth":     true
+  },
+
+  "securityLevel": "loose",
+
+  "_diagram": "CsvFolderImporter_Flow.mmd",
+  "_description": "Mermaid render config for CSV Folder Importer flow diagram. Pair with CsvFolderImporter_Flow.mmd. Render with: mmdc -i CsvFolderImporter_Flow.mmd -o output.svg -c mermaid.config.json"
+}

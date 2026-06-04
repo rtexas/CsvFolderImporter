@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?include DefaultValues.wxi ?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="CSV Folder Importer"
+           Manufacturer="Your Company"
+           Version="1.0.0"
+           UpgradeCode="{7C8D9E0F-1A2B-3C4D-5E6F-7A8B9C0D1E2F}"
+           Language="1033"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of CSV Folder Importer is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Default values read from appsettings.json at build time via DefaultValues.wxi -->
+    <Property Id="SQL_CONNECTION_STRING"  Value="$(var.DefaultConnectionString)" Secure="yes" />
+    <Property Id="ROOT_FOLDER_PATH"       Value="$(var.DefaultRootFolderPath)"   Secure="yes" />
+    <Property Id="POLL_INTERVAL_MINUTES"  Value="$(var.DefaultPollMinutes)"      Secure="yes" />
+    <Property Id="WIXUI_INSTALLDIR"       Value="INSTALLFOLDER" />
+
+    <!-- Directory layout -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="CsvFolderImporter" />
+    </StandardDirectory>
+
+    <!--
+      InstallDir registry marker — lets MSI track the install path for upgrades/repairs.
+      Service registration is handled entirely by setup.ps1 (New-Service) so that MSI
+      does not need ServiceInstall in the same component as the .exe KeyPath.
+    -->
+    <Component Id="InstallDirMarker" Directory="INSTALLFOLDER"
+               Guid="{A3B4C5D6-E7F8-9012-ABCD-EF1234567890}">
+      <RegistryValue Root="HKLM"
+                     Key="SOFTWARE\CsvFolderImporter"
+                     Name="InstallDir"
+                     Value="[INSTALLFOLDER]"
+                     Type="string"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- Writes setup_config.ini so setup.ps1 can read the collected values -->
+    <Component Id="ConfigBootstrap" Directory="INSTALLFOLDER"
+               Guid="{B4C5D6E7-F809-1234-BCDE-F12345678901}">
+      <IniFile Id="IniConnectionString"
+               Name="setup_config.ini" Directory="INSTALLFOLDER"
+               Section="Setup" Key="ConnectionString"
+               Value="[SQL_CONNECTION_STRING]" Action="addLine" />
+      <IniFile Id="IniRootFolderPath"
+               Name="setup_config.ini" Directory="INSTALLFOLDER"
+               Section="Setup" Key="RootFolderPath"
+               Value="[ROOT_FOLDER_PATH]" Action="addLine" />
+      <IniFile Id="IniPollIntervalMinutes"
+               Name="setup_config.ini" Directory="INSTALLFOLDER"
+               Section="Setup" Key="PollIntervalMinutes"
+               Value="[POLL_INTERVAL_MINUTES]" Action="addLine" />
+    </Component>
+
+    <Feature Id="Main" Title="CSV Folder Importer" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="InstallDirMarker" />
+      <ComponentRef Id="ConfigBootstrap" />
+    </Feature>
+
+    <!--
+      Install CA: runs setup.ps1 after files are deployed and ini written.
+      setup.ps1 creates the DB/tables, registers the service via New-Service,
+      configures failure recovery, and starts the service.
+    -->
+    <CustomAction Id="RunSetupScript"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='"[WindowsFolder]System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[INSTALLFOLDER]setup.ps1"'
+                  Execute="deferred"
+                  Return="check"
+                  Impersonate="no" />
+
+    <!--
+      Uninstall CA: stops and deletes the service before files are removed.
+      Return="ignore" so a missing service does not fail the uninstall.
+    -->
+    <CustomAction Id="RemoveService"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='"[WindowsFolder]System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name CsvFolderImporter -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; sc.exe delete CsvFolderImporter"'
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <InstallExecuteSequence>
+      <!-- Install: run after WriteIniValues so the ini file is ready for setup.ps1 -->
+      <Custom Action="RunSetupScript" After="WriteIniValues" Condition="NOT Installed" />
+      <!-- Uninstall: stop and delete the service before files are removed -->
+      <Custom Action="RemoveService" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+    <ui:WixUI Id="WixUI_InstallDir" />
+
+    <UI>
+      <!--
+        Insert SqlConfigDlg between LicenseAgreementDlg and InstallDirDlg.
+        WixUI_InstallDir's built-in Next on LicenseAgreementDlg uses Order=2;
+        Order=3 fires last and wins, redirecting to SqlConfigDlg instead.
+      -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
+               Value="SqlConfigDlg" Order="3"
+               Condition="LicenseAccepted = &quot;1&quot;" />
+
+      <Dialog Id="RequiredFieldsDlg" Width="260" Height="85" Title="Required Fields">
+        <Control Id="Text" Type="Text" X="48" Y="15" Width="194" Height="30" NoPrefix="yes"
+                 Text="SQL Connection String and Root Folder Path are required." />
+        <Control Id="Ok" Type="PushButton" X="102" Y="57" Width="56" Height="17"
+                 Default="yes" Cancel="yes" Text="OK">
+          <Publish Event="EndDialog" Value="Return" Condition="1" />
+        </Control>
+      </Dialog>
+    </UI>
+
+  </Package>
+
+</Wix>

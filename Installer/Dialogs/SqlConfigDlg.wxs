@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <UI>
+      <Dialog Id="SqlConfigDlg" Width="370" Height="270" Title="SQL Server Configuration">
+
+        <!-- Banner -->
+        <Control Id="BannerBitmap" Type="Bitmap"  X="0"   Y="0"   Width="370" Height="44"
+                 TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine"   Type="Line"    X="0"   Y="44"  Width="370" Height="0" />
+        <Control Id="Title"        Type="Text"    X="15"  Y="6"   Width="200" Height="15"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}SQL Server Configuration" />
+        <Control Id="Description"  Type="Text"    X="25"  Y="23"  Width="280" Height="15"
+                 Transparent="yes" NoPrefix="yes"
+                 Text="Enter the SQL Server connection details for CsvFolderImporter." />
+
+        <!-- SQL Connection String -->
+        <Control Id="SqlCsLabel" Type="Text" X="20" Y="55" Width="330" Height="10"
+                 Text="SQL Connection String:" />
+        <Control Id="SqlCsEdit"  Type="Edit" X="20" Y="67" Width="330" Height="18"
+                 Property="SQL_CONNECTION_STRING" Text="{200}" />
+        <Control Id="SqlCsHint"  Type="Text" X="20" Y="87" Width="330" Height="10"
+                 Text="E.g. Server=.;Database=CsvFolderImporter;Trusted_Connection=True;TrustServerCertificate=True;" />
+
+        <!-- Root Folder Path -->
+        <Control Id="RootLabel" Type="Text" X="20"  Y="105" Width="330" Height="10"
+                 Text="Root Folder Path (each subfolder becomes a SQL table):" />
+        <Control Id="RootEdit"  Type="Edit" X="20"  Y="117" Width="330" Height="18"
+                 Property="ROOT_FOLDER_PATH" Text="{200}" />
+
+        <!-- Poll Interval -->
+        <Control Id="PollLabel" Type="Text" X="20"  Y="143" Width="120" Height="10"
+                 Text="Poll Interval (minutes):" />
+        <Control Id="PollEdit"  Type="Edit" X="20"  Y="155" Width="50"  Height="18"
+                 Property="POLL_INTERVAL_MINUTES" Text="{4}" />
+        <Control Id="PollHint"  Type="Text" X="76"  Y="158" Width="270" Height="10"
+                 Text="Files are also processed immediately when dropped into a folder." />
+
+        <!-- Bottom bar and navigation -->
+        <Control Id="BottomLine" Type="Line"       X="0"   Y="234" Width="370" Height="0" />
+        <Control Id="Cancel"     Type="PushButton" X="304" Y="243" Width="56"  Height="17"
+                 Cancel="yes" Text="Cancel">
+          <!-- In WiX v4+, condition is an attribute on Publish, not inner text -->
+          <Publish Event="SpawnDialog" Value="CancelDlg" Condition="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+                 Default="yes" Text="Next">
+          <Publish Event="NewDialog" Value="InstallDirDlg"
+                   Condition="SQL_CONNECTION_STRING &lt;&gt; &quot;&quot; AND ROOT_FOLDER_PATH &lt;&gt; &quot;&quot;" />
+          <Publish Event="SpawnDialog" Value="RequiredFieldsDlg"
+                   Condition="SQL_CONNECTION_STRING = &quot;&quot; OR ROOT_FOLDER_PATH = &quot;&quot;" />
+        </Control>
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="Back">
+          <Publish Event="NewDialog" Value="LicenseAgreementDlg" Condition="1" />
+        </Control>
+
+      </Dialog>
+    </UI>
+  </Fragment>
+
+</Wix>

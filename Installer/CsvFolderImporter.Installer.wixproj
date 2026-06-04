@@ -1,0 +1,28 @@
+<Project Sdk="WixToolset.Wix.Sdk/7.0.0">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>CsvFolderImporterSetup</OutputName>
+    <Platform>x64</Platform>
+    <Configurations>Debug;Release</Configurations>
+    <!--
+      Build the installer via Build-Installer.ps1 at the solution root.
+      That script publishes the app first, then calls dotnet build on this project.
+    -->
+    <PublishDir>$(MSBuildProjectDirectory)\..\publish\</PublishDir>
+    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext"   Version="7.0.0" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <HarvestDirectory Include="$(PublishDir)"
+                      DirectoryRefId="INSTALLFOLDER"
+                      ComponentGroupName="AppFiles"
+                      SuppressRootDirectory="true" />
+  </ItemGroup>
+
+</Project>

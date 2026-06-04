@@ -1,0 +1,75 @@
+---
+title: CSV Folder Importer — Import Process Flow
+---
+flowchart TD
+
+    %% ── Trigger sources ──────────────────────────────────────────────────────
+    FSW([FileSystemWatcher\nEvent]):::terminal
+    PT([Poll Timer\nFires]):::terminal
+
+    FSW --> SCAN
+    PT  --> SCAN
+
+    %% ── Main scan ────────────────────────────────────────────────────────────
+    SCAN["Scan All Non-Reserved Subfolders\n(skips folders starting with _)"]:::process
+
+    SCAN --> FILES_DEC
+
+    FILES_DEC{CSV or Excel\nFiles Found?}:::decision
+
+    FILES_DEC -- No  --> WAIT([Wait for Next\nEvent / Timer]):::terminal
+    FILES_DEC -- Yes --> READ
+
+    %% ── Read file ────────────────────────────────────────────────────────────
+    READ["Read File\nCsvHelper (CSV) | ExcelDataReader (XLSX / XLS)"]:::process
+
+    READ --> READ_DEC
+
+    READ_DEC{Read\nSuccessful?}:::decision
+
+    %% ── Read failure path ────────────────────────────────────────────────────
+    READ_DEC -- No  --> FAIL1["Move to _Failed\n(timestamped filename)"]:::error
+    FAIL1 --> LOGERR1["Log: Error\n(message + file path)"]:::error
+    LOGERR1 --> NEXT_FILE
+
+    %% ── Table lifecycle ──────────────────────────────────────────────────────
+    READ_DEC -- Yes --> TABLE_DEC
+
+    TABLE_DEC{SQL Table\nExists?}:::decision
+
+    TABLE_DEC -- No  --> CREATE["CREATE TABLE\n(from header row)"]:::process
+    TABLE_DEC -- Yes --> TRUNC["TRUNCATE TABLE\n(preserve schema)"]:::process
+
+    CREATE --> BULK
+    TRUNC  --> BULK
+
+    %% ── Bulk insert ──────────────────────────────────────────────────────────
+    BULK["SqlBulkCopy — Insert All Rows"]:::process
+
+    BULK --> INSERT_DEC
+
+    INSERT_DEC{Insert\nSuccessful?}:::decision
+
+    %% ── Insert failure path ──────────────────────────────────────────────────
+    INSERT_DEC -- No  --> FAIL2["Move to _Failed\n(timestamped filename)"]:::error
+    FAIL2 --> LOGERR2["Log: Error\n(message + file path)"]:::error
+    LOGERR2 --> NEXT_FILE
+
+    %% ── Success path ─────────────────────────────────────────────────────────
+    INSERT_DEC -- Yes --> SUCCESS["Move to _Success\n(timestamped filename)"]:::success
+    SUCCESS --> LOGOK["Log: Import complete\n(rows imported, table name)"]:::logging
+    LOGOK --> NEXT_FILE
+
+    %% ── Loop / exit ──────────────────────────────────────────────────────────
+    NEXT_FILE{Next File\nin Folder?}:::terminal
+
+    NEXT_FILE -- Yes --> SCAN
+    NEXT_FILE -- No  --> DONE([Done — Await Next Trigger]):::terminal
+
+    %% ── Styles — match PNG colour scheme ─────────────────────────────────────
+    classDef process  fill:#1F4E79,stroke:#ffffff,stroke-width:2px,color:#ffffff
+    classDef decision fill:#2E7D32,stroke:#ffffff,stroke-width:2px,color:#ffffff
+    classDef terminal fill:#4A235A,stroke:#ffffff,stroke-width:2px,color:#ffffff
+    classDef error    fill:#C62828,stroke:#ffffff,stroke-width:2px,color:#ffffff
+    classDef success  fill:#1B5E20,stroke:#ffffff,stroke-width:2px,color:#ffffff
+    classDef logging  fill:#1565C0,stroke:#ffffff,stroke-width:2px,color:#ffffff
