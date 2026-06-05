@@ -11,9 +11,17 @@ param()
 $ErrorActionPreference = 'Continue'
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
+# Write to a plain-text log in the install folder so failures are readable even
+# after MSI rollback removes the install. The log survives rollback because it is
+# not a managed MSI component.
+$setupLog = Join-Path $scriptDir 'setup_log.txt'
+"" | Set-Content $setupLog -Encoding UTF8   # truncate on each run
+
 function Write-Log([string]$Message, [string]$Level = 'INFO') {
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Write-Host "[$ts] [$Level] $Message"
+    $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $line = "[$ts] [$Level] $Message"
+    Write-Host $line
+    Add-Content $setupLog $line -Encoding UTF8
 }
 
 # ── Read setup_config.ini ─────────────────────────────────────────────────────
@@ -63,75 +71,112 @@ catch {
     exit 1
 }
 
-# ── Parse connection string into sqlcmd arguments ─────────────────────────────
-$csParts = @{}
+# ── Load System.Data.SqlClient from the .NET Framework GAC ───────────────────
+# The MSI custom action runs WindowsPowerShell (5.1 / .NET Framework).
+# System.Data is part of .NET Framework — no external DLL needed.
+Add-Type -AssemblyName 'System.Data'
+
+# Executes a list of SQL batches over a single persistent connection.
+# Opening one connection per database avoids repeated TLS handshakes to the server.
+function Invoke-SqlBatches {
+    param(
+        [string]  $ConnStr,
+        [string[]]$Batches,
+        [int]     $TimeoutSeconds = 60
+    )
+    $conn = [System.Data.SqlClient.SqlConnection]::new($ConnStr)
+    $conn.Open()
+    try {
+        foreach ($b in $Batches) {
+            $cmd = $conn.CreateCommand()
+            $cmd.CommandTimeout = $TimeoutSeconds
+            $cmd.CommandText    = $b
+            $cmd.ExecuteNonQuery() | Out-Null
+        }
+    }
+    finally { $conn.Close() }
+}
+
+
+# Extract the target database name from the connection string.
+$dbName = $null
 foreach ($part in ($connectionString -split ';')) {
-    if ($part -match '^\s*([^=]+?)\s*=\s*(.*?)\s*$') {
-        $csParts[$matches[1].Trim().ToLower()] = $matches[2].Trim()
+    if ($part -match '^\s*(Database|Initial Catalog)\s*=\s*(.+)\s*$') {
+        $dbName = $matches[2].Trim(); break
     }
 }
-
-function Get-CsValue([string[]]$keys) {
-    foreach ($k in $keys) { if ($csParts[$k]) { return $csParts[$k] } }
-    return $null
+if (-not $dbName) {
+    Write-Log 'Could not determine database name from connection string.' 'ERROR'
+    exit 1
 }
+Write-Log "Target database: $dbName"
 
-$server    = Get-CsValue 'server','data source','addr','address','network address'
-$trusted   = (Get-CsValue 'trusted_connection','integrated security') -in @('true','yes','sspi')
-$userId    = Get-CsValue 'user id','uid','user'
-$password  = Get-CsValue 'password','pwd'
-$trustCert = (Get-CsValue 'trustservercertificate') -eq 'true'
-
-if (-not $server) {
-    Write-Log 'Could not parse server name from connection string.' 'WARN'
-    $server = '.'
-}
-
-# Force TCP to avoid Named Pipes issues with remote servers.
-# Named Pipes is sqlcmd's default and often fails on remote hosts.
-$tcpServer = if ($server -match '^(tcp:|np:|lpc:)') { $server } else { "tcp:$server" }
-
-# Base args used for every sqlcmd call
-$baseArgs = [System.Collections.Generic.List[string]]::new()
-$baseArgs.AddRange([string[]]@('-S', $tcpServer, '-l', '30'))   # 30-second login timeout
-if ($trusted) {
-    $baseArgs.Add('-E')
-} else {
-    $baseArgs.AddRange([string[]]@('-U', $userId, '-P', $password))
-}
-# -C trusts the server certificate; supported on ODBC Driver 17.1+ and 18+
-if ($trustCert) { $baseArgs.Add('-C') }
-
-$sqlcmd = Get-Command sqlcmd -ErrorAction SilentlyContinue
-if (-not $sqlcmd) {
-    Write-Log 'sqlcmd not found. Please run SQL\CsvFolderImporter.sql manually and update [dbo].[Settings].' 'WARN'
-    exit 0
+# Build a master-db connection string for CREATE DATABASE (same server, db=master).
+$masterCs = ($connectionString -replace '(?i)(Database|Initial Catalog)\s*=[^;]+', 'Database=master').TrimEnd(';')
+if ($masterCs -notmatch '(?i)(Database|Initial Catalog)\s*=') {
+    $masterCs += ';Database=master'
 }
 
 # ── Run the DDL script (creates DB, tables, seeds settings) ───────────────────
+# The SQL script hardcodes 'CsvFolderImporter' as the DB name; replace it with
+# the actual database name from the connection string before executing.
 $sqlScriptPath = Join-Path $scriptDir 'SQL\CsvFolderImporter.sql'
 if (Test-Path $sqlScriptPath) {
     Write-Log 'Running CsvFolderImporter.sql...'
-    # Connect to master so CREATE DATABASE succeeds; the script switches via USE statements.
-    $ddlArgs = $baseArgs.ToArray() + @('-d', 'master', '-i', $sqlScriptPath)
-    $output = & sqlcmd @ddlArgs 2>&1
-    $output | ForEach-Object { Write-Log $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log 'SQL DDL script reported errors (see above). The database may need to be created manually.' 'WARN'
-    } else {
-        Write-Log 'SQL DDL script completed.'
+    try {
+        $sqlContent = (Get-Content $sqlScriptPath -Raw) -replace 'CsvFolderImporter', $dbName
+        $allBatches = $sqlContent -split '(?im)^\s*GO\s*$'
+
+        # Separate batches into two buckets by tracking USE statements.
+        # System.Data.SqlClient ignores USE — switching databases requires a new connection.
+        # We collect all batches for each context then open ONE connection per context.
+        $masterBatches = @()
+        $targetBatches = @()
+        $inTarget = $false   # start in master context for CREATE DATABASE
+
+        foreach ($batch in $allBatches) {
+            $b = $batch.Trim()
+            if ($b -eq '') { continue }
+
+            # Pure USE statement — flip context flag and skip (SqlClient ignores USE anyway).
+            if ($b -match '(?i)^\s*USE\s+\[?(\w+)\]?\s*;?\s*$') {
+                $inTarget = ($matches[1] -ine 'master')
+                continue
+            }
+
+            if ($inTarget) { $targetBatches += $b } else { $masterBatches += $b }
+        }
+
+        Write-Log "Executing $($masterBatches.Count) batch(es) against [master]..."
+        if ($masterBatches.Count -gt 0) {
+            Invoke-SqlBatches -ConnStr $masterCs -Batches $masterBatches
+            # Give SQL Server a moment to bring the newly-created database fully online
+            # before opening a second connection targeting it.
+            Start-Sleep -Seconds 5
+        }
+
+        Write-Log "Executing $($targetBatches.Count) batch(es) against [$dbName]..."
+        if ($targetBatches.Count -gt 0) {
+            Invoke-SqlBatches -ConnStr $connectionString -Batches $targetBatches
+        }
+
+        Write-Log "SQL DDL script completed."
+    }
+    catch {
+        Write-Log "SQL DDL script failed: $_" 'ERROR'
+        exit 1
     }
 }
 else {
-    Write-Log "SQL script not found at: $sqlScriptPath" 'WARN'
+    Write-Log "SQL script not found at: $sqlScriptPath" 'ERROR'
+    exit 1
 }
 
-# ── Upsert RootFolderPath and PollIntervalMinutes in [dbo].[Settings] ─────────
+# ── Upsert installer-collected values into [dbo].[Settings] ───────────────────
 Write-Log 'Updating [dbo].[Settings]...'
 
 $escapedRoot = $rootFolderPath.Replace("'", "''")
 $settingsSql = @"
-USE [CsvFolderImporter];
 IF EXISTS (SELECT 1 FROM [dbo].[Settings] WHERE [Name] = 'RootFolderPath')
     UPDATE [dbo].[Settings] SET [Value] = '$escapedRoot', [IsEnabled] = 1 WHERE [Name] = 'RootFolderPath';
 ELSE
@@ -143,13 +188,12 @@ ELSE
     INSERT INTO [dbo].[Settings] ([Name],[Value],[IsEnabled]) VALUES ('PollIntervalMinutes','$pollIntervalMinutes',1);
 "@
 
-$settingsArgs = $baseArgs.ToArray() + @('-Q', $settingsSql)
-$output = & sqlcmd @settingsArgs 2>&1
-$output | ForEach-Object { Write-Log $_ }
-if ($LASTEXITCODE -eq 0) {
+try {
+    Invoke-SqlBatches -ConnStr $connectionString -Batches @($settingsSql)
     Write-Log 'Settings table updated.'
-} else {
-    Write-Log 'Failed to update Settings table (see above). Update manually if needed.' 'WARN'
+}
+catch {
+    Write-Log "Failed to update Settings table: $_" 'WARN'
 }
 
 # ── Create root import folder ─────────────────────────────────────────────────
@@ -180,7 +224,7 @@ if ($existingSvc) {
 
 try {
     New-Service -Name 'CsvFolderImporter' `
-                -BinaryPathName $exePath `
+                -BinaryPathName "`"$exePath`"" `
                 -DisplayName 'CSV Folder Importer' `
                 -Description 'Monitors folders and imports CSV/Excel files into SQL Server tables.' `
                 -StartupType Automatic `
