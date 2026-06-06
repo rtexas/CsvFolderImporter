@@ -53,7 +53,7 @@
                    Condition="SQL_CONNECTION_STRING = &quot;&quot; OR ROOT_FOLDER_PATH = &quot;&quot;" />
         </Control>
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="Back">
-          <Publish Event="NewDialog" Value="LicenseAgreementDlg" Condition="1" />
+          <Publish Event="NewDialog" Value="WelcomeDlg" Condition="1" />
         </Control>
 
       </Dialog>

@@ -56,9 +56,22 @@ public sealed class FileImportService
             bool exists = await _tableService.TableExistsAsync(tableName, ct);
 
             if (!exists)
+            {
                 await _tableService.CreateTableAsync(tableName, data.Headers, ct);
+            }
             else
-                await _tableService.TruncateTableAsync(tableName, ct);
+            {
+                int existing = await _tableService.CountRowsForTodayAsync(tableName, ct);
+                if (existing > 0)
+                {
+                    await _logger.LogAsync(
+                        $"[dbo].[{tableName}] already contains {existing} row(s) for today's import date. " +
+                        $"Existing rows will be removed before re-importing.",
+                        LogLevel.Information, ct);
+
+                    await _tableService.DeleteRowsForTodayAsync(tableName, ct);
+                }
+            }
 
             int imported = await _tableService.BulkInsertAsync(tableName, data.Headers, data.Rows, ct);
 

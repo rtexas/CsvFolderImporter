@@ -57,7 +57,7 @@ Write-Step "Copying installer assets..."
 $publishSqlDir = Join-Path $publishDir 'SQL'
 New-Item -ItemType Directory -Path $publishSqlDir -Force | Out-Null
 Copy-Item "$root\SQL\CsvFolderImporter.sql" $publishSqlDir -Force
-Copy-Item "$installerDir\setup.ps1"         $publishDir    -Force
+Copy-Item "$root\setup.ps1"                 $publishDir    -Force
 Write-Host "  Copied SQL script and setup.ps1."
 
 # ── 4. Generate DefaultValues.wxi from appsettings.json ──────────────────────
@@ -93,11 +93,20 @@ New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $srcRoot  = $publishDir.TrimEnd('\')
 $allFiles = Get-ChildItem $srcRoot -File -Recurse | Sort-Object FullName
 
-# Collect unique relative subdirectory paths (non-root files)
-$relDirs = $allFiles |
-    ForEach-Object { $_.DirectoryName.Substring($srcRoot.Length).TrimStart('\') } |
-    Where-Object   { $_ -ne '' } |
-    Sort-Object -Unique
+# Collect ALL unique relative subdirectory paths, including intermediate ancestors.
+# Without this, a file at e.g. "de\sub\foo.dll" would only add "de\sub" to the
+# list, leaving the intermediate "de" directory undeclared and causing WIX0094.
+$relDirsSet = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
+foreach ($f in $allFiles) {
+    $relDir = $f.DirectoryName.Substring($srcRoot.Length).TrimStart('\')
+    if ($relDir -eq '') { continue }
+    $parts = $relDir -split '\\'
+    for ($i = 1; $i -le $parts.Count; $i++) {
+        $relDirsSet.Add(($parts[0..($i - 1)] -join '\')) | Out-Null
+    }
+}
+$relDirs = $relDirsSet | Sort-Object
 
 # Assign stable IDs to each subdirectory
 $dirIdMap = @{}

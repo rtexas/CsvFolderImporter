@@ -4,7 +4,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <Package Name="CSV Folder Importer"
-           Manufacturer="Your Company"
+           Manufacturer="Acme Inc."
            Version="1.0.0"
            UpgradeCode="{7C8D9E0F-1A2B-3C4D-5E6F-7A8B9C0D1E2F}"
            Language="1033"
@@ -18,6 +18,14 @@
     <Property Id="ROOT_FOLDER_PATH"       Value="$(var.DefaultRootFolderPath)"   Secure="yes" />
     <Property Id="POLL_INTERVAL_MINUTES"  Value="$(var.DefaultPollMinutes)"      Secure="yes" />
     <Property Id="WIXUI_INSTALLDIR"       Value="INSTALLFOLDER" />
+
+    <!-- ARP (Add/Remove Programs) icon -->
+    <Icon Id="AppIcon.ico" SourceFile="$(sys.SOURCEFILEDIR)AppIcon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+    <!-- Installer UI branding -->
+    <WixVariable Id="WixUIBannerBmp"  Value="$(sys.SOURCEFILEDIR)WixBanner.bmp" />
+    <WixVariable Id="WixUIDialogBmp"  Value="$(sys.SOURCEFILEDIR)WixDialog.bmp" />
 
     <!-- Directory layout -->
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -75,12 +83,14 @@
                   Impersonate="no" />
 
     <!--
-      Uninstall CA: stops and deletes the service before files are removed.
-      Return="ignore" so a missing service does not fail the uninstall.
+      Uninstall CA: stops and deletes the service, then removes the entire install
+      folder including untracked runtime files (logs, ini, appsettings.json, etc.).
+      Uses $env:ProgramFiles so no property-passing is needed.
+      Return="ignore" so a missing service or already-deleted folder never fails the uninstall.
     -->
     <CustomAction Id="RemoveService"
-                  Directory="INSTALLFOLDER"
-                  ExeCommand='"[WindowsFolder]System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name CsvFolderImporter -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; sc.exe delete CsvFolderImporter"'
+                  Directory="ProgramFiles64Folder"
+                  ExeCommand='"[WindowsFolder]System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name CsvFolderImporter -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; sc.exe delete CsvFolderImporter; Start-Sleep -Seconds 2; $d = Join-Path $env:ProgramFiles CsvFolderImporter; if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }"'
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
@@ -88,21 +98,20 @@
     <InstallExecuteSequence>
       <!-- Install: run after WriteIniValues so the ini file is ready for setup.ps1 -->
       <Custom Action="RunSetupScript" After="WriteIniValues" Condition="NOT Installed" />
-      <!-- Uninstall: stop and delete the service before files are removed -->
+      <!-- Uninstall: stop service, delete service, then remove the install folder -->
       <Custom Action="RemoveService" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
 
     <ui:WixUI Id="WixUI_InstallDir" />
 
     <UI>
-      <!--
-        Insert SqlConfigDlg between LicenseAgreementDlg and InstallDirDlg.
-        WixUI_InstallDir's built-in Next on LicenseAgreementDlg uses Order=2;
-        Order=3 fires last and wins, redirecting to SqlConfigDlg instead.
-      -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
-               Value="SqlConfigDlg" Order="3"
-               Condition="LicenseAccepted = &quot;1&quot;" />
+      <!-- Skip LicenseAgreementDlg on the way forward: WelcomeDlg → SqlConfigDlg. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+               Value="SqlConfigDlg" Order="3" Condition="1" />
+
+      <!-- Skip LicenseAgreementDlg on the way back: InstallDirDlg → SqlConfigDlg. -->
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog"
+               Value="SqlConfigDlg" Order="3" Condition="1" />
 
       <Dialog Id="RequiredFieldsDlg" Width="260" Height="85" Title="Required Fields">
         <Control Id="Text" Type="Text" X="48" Y="15" Width="194" Height="30" NoPrefix="yes"
