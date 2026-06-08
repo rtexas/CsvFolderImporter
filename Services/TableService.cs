@@ -58,47 +58,6 @@ public sealed class TableService
             LogLevel.Information, ct);
     }
 
-    /// <summary>
-    /// Returns the number of rows already stored for today's date (CAST(GETDATE() AS DATE)).
-    /// Returns 0 if the table does not yet have an ImportDate column.
-    /// </summary>
-    public async Task<int> CountRowsForTodayAsync(string tableName, CancellationToken ct = default)
-    {
-        var sql = $"""
-            SELECT COUNT(1) FROM [dbo].[{EscapeName(tableName)}]
-            WHERE [ImportDate] = CAST(GETDATE() AS DATE);
-            """;
-
-        await using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync(ct);
-        await using var command = new SqlCommand(sql, connection);
-        var result = await command.ExecuteScalarAsync(ct);
-        return Convert.ToInt32(result);
-    }
-
-    /// <summary>
-    /// Deletes all rows whose ImportDate equals today's date, leaving all other dates intact.
-    /// Returns the number of rows deleted.
-    /// </summary>
-    public async Task<int> DeleteRowsForTodayAsync(string tableName, CancellationToken ct = default)
-    {
-        var sql = $"""
-            DELETE FROM [dbo].[{EscapeName(tableName)}]
-            WHERE [ImportDate] = CAST(GETDATE() AS DATE);
-            """;
-
-        await using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync(ct);
-        await using var command = new SqlCommand(sql, connection);
-        var deleted = await command.ExecuteNonQueryAsync(ct);
-
-        await _logger.LogAsync(
-            $"Deleted {deleted} existing row(s) for today from [dbo].[{tableName}].",
-            LogLevel.Information, ct);
-
-        return deleted;
-    }
-
     public async Task<int> BulkInsertAsync(
         string       tableName,
         List<string> columns,
